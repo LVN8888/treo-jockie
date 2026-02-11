@@ -1,3 +1,18 @@
-/.env
-/bot_logs.txt
-/configs
+# Tệp cấu hình chứa Token (Cực kỳ quan trọng)
+.env
+configs/*.env
+
+# Nhật ký hoạt động (Logs)
+*.log
+bot_logs.txt
+
+# Thư viện Node.js
+node_modules/
+
+# Các tệp hệ thống và rác của OS
+.DS_Store
+Thumbs.db
+
+# Tệp build hoặc tệp tạm (nếu có)
+dist/
+build/
