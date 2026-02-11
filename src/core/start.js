@@ -4,10 +4,8 @@ const { sleep } = require("../utils/parsers");
 const logger = require("./logger");
 
 async function startAccount(client, acc) {
-  // Flag to prevent overlapping reconnection attempts
   let isReconnecting = false;
 
-  // --- FUNCTION TO EXECUTE MUSIC COMMANDS ---
   const runMusicCommands = async () => {
     if (!acc.sendChat) return;
     try {
@@ -18,19 +16,18 @@ async function startAccount(client, acc) {
       await sleep(10000);
       await sendVoiceChat(client, acc.voiceChannelId, "m!lq");
     } catch (err) {
-      logger(`[ERROR] Could not send commands for ${client.user.tag}: ${err.message}`);
+      logger(`[ERROR] Command failed for ${client.user.tag}: ${err.message}`);
     }
   };
 
-  // --- RECONNECTION LOGIC ---
   const handleReconnect = async () => {
     if (isReconnecting) return;
     isReconnecting = true;
 
-    logger(`[${client.user.tag}] Voice disconnection detected. Reconnecting in 10s...`);
+    logger(`[${client.user.tag}] Fully disconnected from voice. Reconnecting in 10s...`);
     
     try {
-      await sleep(10000); // 10s cooldown to avoid Discord spam triggers
+      await sleep(10000); 
       await connectToVoice(client, acc);
       await runMusicCommands();
     } catch (err) {
@@ -45,18 +42,28 @@ async function startAccount(client, acc) {
     await connectToVoice(client, acc);
     if (acc.sendChat) {
       await runMusicCommands();
-      // Maintain the periodic command cycle (e.g., every 11 hours)
       setInterval(runMusicCommands, acc.intervalMs);
     }
   } catch (err) {
     logger(`[INITIAL START FAILED] ${client.user.tag}: ${err.message}`);
   }
 
-  // 2. LISTEN FOR VOICE STATE CHANGES (The "Auto-Joiner")
+  // 2. TARGETED VOICE MONITORING (Disconnect Only)
   client.on("voiceStateUpdate", async (oldState, newState) => {
-    // Check if the member is the current account and the new channel is null (disconnected)
-    if (oldState.member.id === client.user.id && !newState.channelId) {
-      await handleReconnect();
+    // Only care about your specific server
+    if (oldState.guild.id !== acc.guildId) return;
+
+    // Only care about this specific bot account
+    if (oldState.member.id === client.user.id) {
+      
+      // LOGIC: If newState.channelId is null, it means the bot IS NOT in any channel anymore
+      if (!newState.channelId) {
+        await handleReconnect();
+      } else {
+        // If the bot was just moved to another channel, we do nothing.
+        // It stays in the new channel peacefully.
+        logger(`[${client.user.tag}] Moved to a different channel (${newState.channel.name}). Staying put.`);
+      }
     }
   });
 }
