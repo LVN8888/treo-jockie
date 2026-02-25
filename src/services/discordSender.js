@@ -5,7 +5,6 @@ async function sendVoiceChat(client, channelId, content) {
     const channel = await client.channels.fetch(channelId);
     if (!channel) return logger(`[ERROR] Channel not found ${channelId}`);
     
-    // Gửi tin nhắn vào text channel của Voice
     await channel.send(content);
     logger(`[${client.user.tag}] Send command successfully: ${content}`);
   } catch (e) {
