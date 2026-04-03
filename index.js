@@ -11,10 +11,9 @@ if (!accounts || accounts.length === 0) {
 async function initBot() {
   for (const acc of accounts) {
     try {
-      // 1. Khởi tạo Client nguyên bản
+
       const client = new Client();
 
-      // 2. Tự động dọn rác RAM (Chạy ngầm 10 phút/lần)
       setInterval(() => {
         try {
           client.channels.cache.forEach(channel => {
@@ -29,31 +28,24 @@ async function initBot() {
             }
           });
         } catch (err) {
-          // Bỏ qua lỗi lặt vặt lúc dọn rác
+          logger(`[CACHE CLEAR ERROR] ${client.user?.tag || 'Unknown'}: ${err.message}`); 
         }
       }, 10 * 60 * 1000); 
 
-      // 3. Xử lý event ready
       client.on("ready", () => {
         logger(`Bot ${client.user.tag} is ready.`);
         startAccount(client, acc);
       });
 
-      // 4. Login
       await client.login(acc.token);
-
     } catch (error) {
       logger(`Login failed for account ${acc.index}: ${error.message}`);
     }
   }
 }
 
-// Bắt đầu chạy
 initBot();
 
-// ==========================================
-// HỆ THỐNG ANTI-CRASH (CHỐNG VĂNG TOOL 100%)
-// ==========================================
 process.on("unhandledRejection", (reason) => {
   logger(`[ANTI-CRASH] Unhandled Rejection: ${reason}`);
 });

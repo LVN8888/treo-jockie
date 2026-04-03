@@ -12,7 +12,7 @@ async function startAccount(client, acc) {
       logger(`[${client.user.tag}] Sending music commands...`);
       await sendVoiceChat(client, acc.voiceChannelId, "m!leave");
       await sleep(10000);
-      await sendVoiceChat(client, acc.voiceChannelId, acc.playlist);
+      await sendVoiceChat(client, acc.voiceChannelId, "m!p " + acc.playlist);
       await sleep(10000);
       await sendVoiceChat(client, acc.voiceChannelId, "m!lq");
     } catch (err) {
@@ -37,7 +37,6 @@ async function startAccount(client, acc) {
     }
   };
 
-  // 1. INITIAL STARTUP
   try {
     await connectToVoice(client, acc);
     if (acc.sendChat) {
@@ -48,20 +47,14 @@ async function startAccount(client, acc) {
     logger(`[INITIAL START FAILED] ${client.user.tag}: ${err.message}`);
   }
 
-  // 2. TARGETED VOICE MONITORING (Disconnect Only)
-  client.on("voiceStateUpdate", async (oldState, newState) => {
-    // Only care about your specific server
-    if (oldState.guild.id !== acc.guildId) return;
 
-    // Only care about this specific bot account
+  client.on("voiceStateUpdate", async (oldState, newState) => {
+    if (oldState.guild.id !== acc.guildId) return;
     if (oldState.member.id === client.user.id) {
       
-      // LOGIC: If newState.channelId is null, it means the bot IS NOT in any channel anymore
       if (!newState.channelId) {
         await handleReconnect();
       } else {
-        // If the bot was just moved to another channel, we do nothing.
-        // It stays in the new channel peacefully.
         logger(`[${client.user.tag}] Moved to a different channel (${newState.channel.name}). Staying put.`);
       }
     }
