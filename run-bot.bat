@@ -21,9 +21,9 @@ if not exist "%CONFIG_DIR%\" (
   exit /b 1
 )
 
-echo [SYS] He thong quet tu dong dang hoat dong.
-echo [SYS] - Them file .env = Tu dong chay acc.
-echo [SYS] - Doi ten thanh .off / Di chuyen file = Tu dong tat acc.
+echo [SYS] System is now monitoring.
+echo [SYS] - Adding .env file = Auto start account.
+echo [SYS] - Renaming to .off / Moving file = Auto stop account.
 echo =======================================================
 echo.
 
@@ -48,8 +48,8 @@ for /f "tokens=1* delims==" %%A in ('set DEPLOYED_ 2^>nul') do (
   
   :: Nếu file không còn tồn tại trong folder config
   if not exist "%CONFIG_DIR%\!FILE_NAME!" (
-    echo [SYS] %time:~0,8% - Phat hien !FILE_NAME! da bi xoa/doi ten!
-    echo [STP] Dang tu dong ep dung bot cua !FILE_NAME!...
+    echo [SYS] %time:~0,8% - Detected !FILE_NAME! has been deleted/renamed!
+    echo [STP] Automatically stopping bot for !FILE_NAME!...
     wmic process where "name='node.exe' and commandline like '%%!FILE_NAME!%%'" call terminate >nul 2>&1
     
     :: Xóa cờ ghi nhớ để nhỡ bạn thả file đó vào lại thì nó sẽ tự chạy lại
@@ -70,7 +70,7 @@ set "INSTANCE_ID=%~nx1"
 :REBOOT_LOOP
 :: Nếu file .env không tồn tại (do bạn đổi đuôi), thoát hẳn tiến trình con (không tự mở lại nữa)
 if not exist "%CONFIG%" (
-  echo [DWN :: %INSTANCE_ID%] %time:~0,8% - Tien trinh chay ngam da ket thuc an toan.
+  echo [DWN :: %INSTANCE_ID%] %time:~0,8% - Process terminated safely.
   exit /b 0
 )
 
