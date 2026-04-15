@@ -21,23 +21,39 @@ if not exist "%CONFIG_DIR%\" (
   exit /b 1
 )
 
-echo [SYS] Background monitoring started. Press Ctrl+C to abort all.
+echo [SYS] He thong quet tu dong dang hoat dong.
+echo [SYS] - Them file .env = Tu dong chay acc.
+echo [SYS] - Doi ten thanh .off / Di chuyen file = Tu dong tat acc.
 echo =======================================================
 echo.
 
-:: --- Quét và theo dõi file mới liên tục ---
+:: --- Quét và theo dõi liên tục ---
 :MONITOR_LOOP
+:: 1. Quét tìm file .env mới để chạy
 for %%f in ("%CONFIG_DIR%\*.env") do (
-  :: Kiểm tra xem biến DEPLOYED_tênfile đã tồn tại chưa
   if not defined DEPLOYED_%%~nxf (
-    :: Đánh dấu là đã chạy để lần quét sau không bị trùng
     set "DEPLOYED_%%~nxf=1"
     
     echo [SYS] %time:~0,8% - Detected payload: "%%~nxf"
     echo [AWT] Deploying instance: "%%~nxf"
-    
-    :: Chạy ngầm tiến trình con
     start /B "" cmd /c ""%~f0" "%%~ff""
+  )
+)
+
+:: 2. Quét kiểm tra các file đã chạy, nếu bị đổi tên/xóa thì TỰ ĐỘNG TẮT NODE
+for /f "tokens=1* delims==" %%A in ('set DEPLOYED_ 2^>nul') do (
+  :: %%A là tên biến (vd: DEPLOYED_acc1.env). Lọc lấy chữ acc1.env
+  set "VAR_NAME=%%A"
+  set "FILE_NAME=!VAR_NAME:DEPLOYED_=!"
+  
+  :: Nếu file không còn tồn tại trong folder config
+  if not exist "%CONFIG_DIR%\!FILE_NAME!" (
+    echo [SYS] %time:~0,8% - Phat hien !FILE_NAME! da bi xoa/doi ten!
+    echo [STP] Dang tu dong ep dung bot cua !FILE_NAME!...
+    wmic process where "name='node.exe' and commandline like '%%!FILE_NAME!%%'" call terminate >nul 2>&1
+    
+    :: Xóa cờ ghi nhớ để nhỡ bạn thả file đó vào lại thì nó sẽ tự chạy lại
+    set "DEPLOYED_!FILE_NAME!="
   )
 )
 
@@ -52,9 +68,13 @@ set "CONFIG=%~1"
 set "INSTANCE_ID=%~nx1"
 
 :REBOOT_LOOP
-echo [INI :: %INSTANCE_ID%] %time:~0,8% - Initializing sequence...
+:: Nếu file .env không tồn tại (do bạn đổi đuôi), thoát hẳn tiến trình con (không tự mở lại nữa)
+if not exist "%CONFIG%" (
+  echo [DWN :: %INSTANCE_ID%] %time:~0,8% - Tien trinh chay ngam da ket thuc an toan.
+  exit /b 0
+)
 
-:: Thêm --max-old-space-size=150 để ép Node.js dọn rác sớm, tối ưu RAM cực tốt cho việc treo nhiều acc
+echo [INI :: %INSTANCE_ID%] %time:~0,8% - Initializing sequence...
 node --max-old-space-size=150 "%~dp0index.js" --configs "%CONFIG%"
 set "EXIT_CODE=%ERRORLEVEL%"
 
