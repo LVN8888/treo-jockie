@@ -5,8 +5,27 @@ const logger = require("./logger");
 
 async function startAccount(client, acc) {
   let isReconnecting = false;
-  let musicLoopRunning = false;
-  let stopMusicLoop = false;
+  let musicTimer = null;
+  let currentConnection = null;
+
+  const clearMusicTimer = () => {
+    if (musicTimer) {
+      clearTimeout(musicTimer);
+      musicTimer = null;
+    }
+  };
+
+  const destroyCurrentConnection = () => {
+    try {
+      if (currentConnection && typeof currentConnection.destroy === "function") {
+        currentConnection.destroy();
+      }
+    } catch (err) {
+      logger(`[DESTROY CONNECTION ERROR] ${client.user?.tag}: ${err.message}`);
+    } finally {
+      currentConnection = null;
+    }
+  };
 
   const runMusicCommands = async () => {
     if (!acc.sendChat) return;
@@ -15,7 +34,7 @@ async function startAccount(client, acc) {
       logger(`[${client.user.tag}] Sending music commands...`);
       await sendVoiceChat(client, acc.voiceChannelId, "m!leave");
       await sleep(5000);
-      await sendVoiceChat(client, acc.voiceChannelId, "m!p " + acc.playlist);
+      await sendVoiceChat(client, acc.voiceChannelId, `m!p ${acc.playlist}`);
       await sleep(5000);
       await sendVoiceChat(client, acc.voiceChannelId, "m!lq");
     } catch (err) {
@@ -23,49 +42,47 @@ async function startAccount(client, acc) {
     }
   };
 
-  const startMusicLoop = async () => {
-    if (!acc.sendChat || musicLoopRunning) return;
+  const scheduleMusicLoop = () => {
+    if (!acc.sendChat) return;
 
-    musicLoopRunning = true;
-    stopMusicLoop = false;
+    clearMusicTimer();
 
-    while (!stopMusicLoop) {
-      await sleep(acc.intervalMs);
-
-      if (stopMusicLoop) break;
-
+    musicTimer = setTimeout(async () => {
       try {
         await runMusicCommands();
       } catch (err) {
         logger(`[MUSIC LOOP ERROR] ${client.user.tag}: ${err.message}`);
+      } finally {
+        scheduleMusicLoop();
       }
-    }
-
-    musicLoopRunning = false;
+    }, acc.intervalMs);
   };
 
-  const stopLoop = () => {
-    stopMusicLoop = true;
+  const bootstrapMusicLoop = async () => {
+    if (!acc.sendChat) return;
+    await runMusicCommands();
+    scheduleMusicLoop();
   };
 
   const handleReconnect = async () => {
     if (isReconnecting) return;
     isReconnecting = true;
 
-    stopLoop();
+    clearMusicTimer();
+    destroyCurrentConnection();
 
     logger(`[${client.user.tag}] Voice disconnected. Reconnecting in 10s...`);
 
     while (true) {
       try {
         await sleep(10000);
-        await connectToVoice(client, acc);
+
+        currentConnection = await connectToVoice(client, acc);
 
         logger(`[${client.user.tag}] Reconnected successfully.`);
 
         if (acc.sendChat) {
-          await runMusicCommands();
-          startMusicLoop();
+          await bootstrapMusicLoop();
         }
 
         break;
@@ -78,11 +95,10 @@ async function startAccount(client, acc) {
   };
 
   try {
-    await connectToVoice(client, acc);
+    currentConnection = await connectToVoice(client, acc);
 
     if (acc.sendChat) {
-      await runMusicCommands();
-      startMusicLoop();
+      await bootstrapMusicLoop();
     }
   } catch (err) {
     logger(`[INITIAL START FAILED] ${client.user.tag}: ${err.message}`);
@@ -90,13 +106,17 @@ async function startAccount(client, acc) {
   }
 
   client.on("voiceStateUpdate", async (oldState, newState) => {
-    if (oldState.guild.id !== acc.guildId) return;
-    if (oldState.member.id !== client.user.id) return;
+    try {
+      if (!oldState?.guild?.id || oldState.guild.id !== acc.guildId) return;
+      if (!oldState?.member?.id || oldState.member.id !== client.user.id) return;
 
-    if (!newState.channelId) {
-      await handleReconnect();
-    } else if (oldState.channelId !== newState.channelId) {
-      logger(`[${client.user.tag}] Switched to ${newState.channel?.name}.`);
+      if (!newState.channelId) {
+        await handleReconnect();
+      } else if (oldState.channelId !== newState.channelId) {
+        logger(`[${client.user.tag}] Switched to ${newState.channel?.name || newState.channelId}.`);
+      }
+    } catch (err) {
+      logger(`[VOICE STATE ERROR] ${client.user?.tag}: ${err.message}`);
     }
   });
 }

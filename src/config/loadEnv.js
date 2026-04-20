@@ -24,7 +24,7 @@ const accounts = getIndices(raw).map(index => {
     voiceChannelId: raw[`VOICE_CHANNEL_ID${suffix}`],
     sendChat: parseBoolean(raw[`SEND_CHAT${suffix}`], true),
     intervalMs: parseInterval(raw[`INTERVAL${suffix}`], 11 * 60 * 60 * 1000),
-    playlist: raw[`PLAYLIST${suffix}`] || "m!p https://open.spotify.com/playlist/0lBaE5j1bT9nPPRDC4TUkP?si=faf23a5b46844642",
+    playlist: raw[`PLAYLIST${suffix}`] || "https://open.spotify.com/playlist/0lBaE5j1bT9nPPRDC4TUkP?si=faf23a5b46844642",
     selfDeaf: parseBoolean(raw[`SELFDEAF${suffix}`], false),
     selfMute: parseBoolean(raw[`SELFMUTE${suffix}`], false),
   };
