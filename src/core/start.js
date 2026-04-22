@@ -140,7 +140,7 @@ async function startAccount(client, acc) {
         await handleReconnect();
       } else if (oldState.channelId !== newState.channelId) {
         logger(
-          `[${client.user.tag}] Switched to ${newState.channel?.name || newState.channelId}.`
+          `[${client.user.tag}] Moved: ${oldState.channel?.name || oldState.channelId || "none"} -> ${newState.channel?.name || newState.channelId}`
         );
       }
     } catch (err) {
@@ -219,10 +219,12 @@ async function startAccount(client, acc) {
 
         try {
           isManualDisconnect = true;
+
           destroyCurrentConnection();
           await sleep(2000);
 
           currentConnection = await connectToVoice(client, acc);
+
           isManualDisconnect = false;
 
           if (acc.sendChat) {
