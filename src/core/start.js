@@ -14,7 +14,6 @@ function saveToEnv(accIndex, baseKey, newValue) {
     let envContent = fs.readFileSync(envPath, "utf8");
     const suffix = accIndex !== "default" ? `_${accIndex}` : "";
     const fullKey = `${baseKey}${suffix}`;
-
     const regex = new RegExp(`^${fullKey}=.*$`, "m");
 
     if (regex.test(envContent)) {
@@ -37,11 +36,27 @@ async function startAccount(client, acc) {
   let musicTimer = null;
   let currentConnection = null;
   let healthCheckInterval = null;
+  let reconnectCheckTimer = null;
 
   const clearMusicTimer = () => {
     if (musicTimer) {
       clearTimeout(musicTimer);
       musicTimer = null;
+    }
+  };
+
+  const clearReconnectCheckTimer = () => {
+    if (reconnectCheckTimer) {
+      clearTimeout(reconnectCheckTimer);
+      reconnectCheckTimer = null;
+    }
+  };
+
+  const getCurrentVoiceChannelId = () => {
+    try {
+      return client.guilds.cache.get(acc.guildId)?.members?.me?.voice?.channelId || null;
+    } catch {
+      return null;
     }
   };
 
@@ -83,6 +98,8 @@ async function startAccount(client, acc) {
     musicTimer = setTimeout(async () => {
       try {
         await runMusicCommands();
+      } catch (err) {
+        logger(`[MUSIC LOOP ERROR] ${err.message}`);
       } finally {
         scheduleMusicLoop();
       }
@@ -95,40 +112,12 @@ async function startAccount(client, acc) {
     scheduleMusicLoop();
   };
 
-  const attachConnectionListeners = (connection) => {
-    if (!connection?.on) return;
-
-    connection.on("error", async () => {
-      if (!isManualDisconnect) {
-        await handleReconnect("connection_error");
-      }
-    });
-
-    connection.on("stateChange", async (_, newState) => {
-      try {
-        const newStatus = newState?.status || "unknown";
-
-        if (isManualDisconnect) return;
-
-        if (
-          newStatus === VoiceConnectionStatus.Disconnected ||
-          newStatus === VoiceConnectionStatus.Destroyed ||
-          newStatus === "disconnected" ||
-          newStatus === "destroyed"
-        ) {
-          await handleReconnect(`state_${newStatus}`);
-        }
-      } catch (err) {
-        logger(`[STATE ERROR] ${err.message}`);
-      }
-    });
-  };
-
   const handleReconnect = async (reason = "unknown") => {
     if (isReconnecting || isManualDisconnect) return;
     isReconnecting = true;
 
     clearMusicTimer();
+    clearReconnectCheckTimer();
     destroyCurrentConnection();
 
     let retry = 0;
@@ -158,6 +147,62 @@ async function startAccount(client, acc) {
     isReconnecting = false;
   };
 
+  const scheduleReconnectCheck = (reason = "unknown") => {
+    if (isManualDisconnect || isReconnecting) return;
+
+    clearReconnectCheckTimer();
+
+    reconnectCheckTimer = setTimeout(async () => {
+      try {
+        if (isManualDisconnect || isReconnecting) return;
+
+        const currentChannelId = getCurrentVoiceChannelId();
+
+        // Nếu bot vẫn còn đang ở voice thì không reconnect
+        if (currentChannelId) {
+          if (String(currentChannelId) !== String(acc.voiceChannelId)) {
+            acc.voiceChannelId = currentChannelId;
+            saveToEnv(acc.index, "VOICE_CHANNEL_ID", currentChannelId);
+          }
+          return;
+        }
+
+        await handleReconnect(reason);
+      } catch (err) {
+        logger(`[RECONNECT CHECK ERROR] ${err.message}`);
+      }
+    }, 3000);
+  };
+
+  const attachConnectionListeners = (connection) => {
+    if (!connection?.on) return;
+
+    connection.on("error", async () => {
+      if (!isManualDisconnect) {
+        scheduleReconnectCheck("connection_error");
+      }
+    });
+
+    connection.on("stateChange", async (_, newState) => {
+      try {
+        if (isManualDisconnect) return;
+
+        const newStatus = newState?.status;
+
+        if (
+          newStatus === VoiceConnectionStatus.Disconnected ||
+          newStatus === VoiceConnectionStatus.Destroyed ||
+          newStatus === "disconnected" ||
+          newStatus === "destroyed"
+        ) {
+          scheduleReconnectCheck(`state_${newStatus}`);
+        }
+      } catch (err) {
+        logger(`[STATE ERROR] ${err.message}`);
+      }
+    });
+  };
+
   const startHealthCheck = () => {
     if (healthCheckInterval) clearInterval(healthCheckInterval);
 
@@ -165,21 +210,20 @@ async function startAccount(client, acc) {
       try {
         if (isManualDisconnect || isReconnecting) return;
 
-        const me = client.guilds.cache.get(acc.guildId)?.members?.me;
-        const currentChannelId = me?.voice?.channelId;
+        const currentChannelId = getCurrentVoiceChannelId();
 
         if (!currentConnection) {
           await handleReconnect("healthcheck_no_connection");
           return;
         }
 
+        // Chỉ reconnect khi out hẳn
         if (!currentChannelId) {
           await handleReconnect("healthcheck_not_in_voice");
           return;
         }
 
-        // Nếu bot bị move sang channel khác thì giữ nguyên, không rejoin lại
-        // Chỉ cập nhật channel hiện tại để sau này reconnect sẽ vào đúng channel mới
+        // Nếu bị move sang channel khác thì cập nhật lại target channel
         if (String(currentChannelId) !== String(acc.voiceChannelId)) {
           acc.voiceChannelId = currentChannelId;
           saveToEnv(acc.index, "VOICE_CHANNEL_ID", currentChannelId);
@@ -209,15 +253,15 @@ async function startAccount(client, acc) {
       if (!oldState?.guild?.id || oldState.guild.id !== acc.guildId) return;
       if (!oldState?.member?.id || oldState.member.id !== client.user.id) return;
 
-      // Bot out hẳn khỏi voice -> reconnect
+      // Out hẳn khỏi voice
       if (!newState.channelId) {
         if (!isManualDisconnect) {
-          await handleReconnect("voice_left_channel");
+          scheduleReconnectCheck("voice_left_channel");
         }
         return;
       }
 
-      // Bot bị move sang channel khác -> không reconnect, chỉ cập nhật channel mới
+      // Bị move sang channel khác -> không reconnect, chỉ cập nhật channel mới
       if (oldState.channelId !== newState.channelId) {
         acc.voiceChannelId = newState.channelId;
         saveToEnv(acc.index, "VOICE_CHANNEL_ID", newState.channelId);
@@ -297,6 +341,7 @@ async function startAccount(client, acc) {
         await message.reply(`🔄 Đang chuyển sang kênh: <#${newChannelId}>.`).catch(() => {});
 
         clearMusicTimer();
+        clearReconnectCheckTimer();
 
         try {
           isManualDisconnect = true;
