@@ -5,7 +5,6 @@ const { sleep } = require("../utils/parsers");
 const logger = require("./logger");
 const resolveEnvPath = require("../config/resolveEnvPath");
 
-// Hàm ghi đè dữ liệu vào file .env
 function saveToEnv(accIndex, baseKey, newValue) {
   try {
     const envPath = resolveEnvPath();
@@ -26,13 +25,14 @@ function saveToEnv(accIndex, baseKey, newValue) {
     fs.writeFileSync(envPath, envContent, "utf8");
     return true;
   } catch (err) {
-    logger(`[LỖI GHI FILE ENV]: ${err.message}`);
+    logger(`[ERROR WRITING ENV FILE]: ${err.message}`);
     return false;
   }
 }
 
 async function startAccount(client, acc) {
   let isReconnecting = false;
+  let isManualDisconnect = false; // FLAG: Chặn auto-reconnect khi đổi kênh
   let musicTimer = null;
   let currentConnection = null;
 
@@ -104,15 +104,12 @@ async function startAccount(client, acc) {
     while (true) {
       try {
         await sleep(10000);
-
         currentConnection = await connectToVoice(client, acc);
-
         logger(`[${client.user.tag}] Reconnected successfully.`);
 
         if (acc.sendChat) {
           await bootstrapMusicLoop();
         }
-
         break;
       } catch (err) {
         logger(`[RECONNECT FAILED] ${client.user.tag}: ${err.message}`);
@@ -122,10 +119,8 @@ async function startAccount(client, acc) {
     isReconnecting = false;
   };
 
-  // --- KẾT NỐI LẦN ĐẦU ---
   try {
     currentConnection = await connectToVoice(client, acc);
-
     if (acc.sendChat) {
       await bootstrapMusicLoop();
     }
@@ -141,7 +136,10 @@ async function startAccount(client, acc) {
       if (!oldState?.member?.id || oldState.member.id !== client.user.id) return;
 
       if (!newState.channelId) {
-        await handleReconnect();
+
+        if (!isManualDisconnect) {
+          await handleReconnect();
+        }
       } else if (oldState.channelId !== newState.channelId) {
         logger(`[${client.user.tag}] Switched to ${newState.channel?.name || newState.channelId}.`);
       }
@@ -150,7 +148,7 @@ async function startAccount(client, acc) {
     }
   });
 
-  // --- SỰ KIỆN LẮNG NGHE LỆNH (MENU) ---
+  // --- MENU ---
   client.on("messageCreate", async (message) => {
     try {
       if (!message.author || message.author.id !== client.user.id) return;
@@ -164,7 +162,7 @@ async function startAccount(client, acc) {
         const statusMusic = acc.sendChat ? "🟢 **BẬT**" : "🔴 **TẮT**";
         
         const menuText = 
-          `**━━━ 🎛️ BẢNG ĐIỀU KHIỂN BOT TREO JOCKIE 🎛️ ━━━**\n` +
+          `**━━━ 🎛️ MENU BOT TREO JOCKIE 🎛️ ━━━**\n` +
           `👤 **Tài khoản:** \`${client.user.username}\`\n\n` +
           `📊 **TRẠNG THÁI HIỆN TẠI:**\n` +
           `> 📻 **Auto Music:** ${statusMusic}\n` +
@@ -172,9 +170,9 @@ async function startAccount(client, acc) {
           `> 🎶 **Playlist:** \`${acc.playlist}\`\n\n` +
           `🛠️ **DANH SÁCH LỆNH:**\n` +
           `\`!music on\` / \`off\` ➔ Bật/tắt vòng lặp nhạc\n` +
-          `\`!channel <ID_KÊNH>\` ➔ Đổi kênh Voice (Sẽ tự động gọi bot theo)\n` +
-          `\`!playlist <Link>\` ➔ Đổi playlist mới`;
-          `Lưu ý: Bật/tắt nhạc trước khi đổi kênh để tránh lỗi.`;
+          `\`!channel <ID_KÊNH>\` ➔ Đổi channel Voice (sẽ tự động gọi bot Jockie theo nếu Auto Music đang BẬT)\n` +
+          `\`!playlist <Link>\` ➔ Đổi playlist mới\n\n` +
+          `*Lưu ý: Bật/tắt nhạc trước khi đổi channel để tránh lỗi.*`;
         
         await message.reply(menuText).catch(() => {});
       }
@@ -215,14 +213,31 @@ async function startAccount(client, acc) {
 
         await message.reply(`🔄 Đang chuyển sang kênh: <#${newChannelId}>.`).catch(() => {});
         
-        // 1. Chuyển kênh acc treo
-        await handleReconnect(); 
+        clearMusicTimer();
 
-        // 2. Gọi bot vào theo nếu Music đang bật
-        if (acc.sendChat) {
-          logger(`[${client.user.tag}] Auto music is ON. Sending m!join...`);
-          await sleep(3000); // Chờ 3s cho ổn định
-          await sendVoiceChat(client, acc.voiceChannelId, "m!join");
+        try {
+          isManualDisconnect = true; 
+
+          destroyCurrentConnection();
+          await sleep(2000);
+          
+          currentConnection = await connectToVoice(client, acc);
+          logger(`[${client.user.tag}] Move successful to channel ${newChannelId}.`);
+
+          isManualDisconnect = false; 
+          if (acc.sendChat) {
+            logger(`[${client.user.tag}] Auto music is ON. Sending m!join first...`);
+            
+            await sleep(3000);
+            await sendVoiceChat(client, acc.voiceChannelId, "m!join");
+            
+            await sleep(3000);
+            await bootstrapMusicLoop();
+          }
+        } catch (err) {
+          isManualDisconnect = false; 
+          logger(`[ERROR MOVE CHANNEL] ${client.user?.tag}: ${err.message}`);
+          await handleReconnect();
         }
       }
 
