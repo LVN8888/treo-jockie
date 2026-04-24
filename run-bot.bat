@@ -26,24 +26,44 @@ echo =======================================================
 echo.
 
 :MONITOR_LOOP
+
+:: Start new .env instances
 for %%f in ("%CONFIG_DIR%\*.env") do (
   if exist "%%~ff" (
     if not defined DEPLOYED_%%~nxf (
       set "DEPLOYED_%%~nxf=1"
       echo [SYS] %time:~0,8% - Detected payload: "%%~nxf"
       echo [AWT] Deploying instance: "%%~nxf"
-      start "" /B cmd /c call "%~f0" --child "%%~ff"
+
+      powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c call ""%~f0"" --child ""%%~ff""' -WindowStyle Hidden -PassThru; Write-Output $p.Id" > "%TEMP%\treo_pid_%%~nxf.txt"
+
+      set /p "PID_%%~nxf="<"%TEMP%\treo_pid_%%~nxf.txt"
+      echo [PID] %%~nxf = !PID_%%~nxf!
     )
   )
 )
 
+:: Stop removed/renamed .env instances
 for /f "tokens=1* delims==" %%A in ('set DEPLOYED_ 2^>nul') do (
   set "VAR_NAME=%%A"
   set "FILE_NAME=!VAR_NAME:DEPLOYED_=!"
+
   if not exist "%CONFIG_DIR%\!FILE_NAME!" (
     echo [SYS] %time:~0,8% - Detected !FILE_NAME! has been deleted/renamed!
     echo [STP] Automatically stopping bot for !FILE_NAME!...
-    taskkill /F /IM node.exe >nul 2>&1
+
+    set "TARGET_PID=!PID_!FILE_NAME!!"
+
+    if defined TARGET_PID (
+      taskkill /F /T /PID !TARGET_PID! >nul 2>&1
+      echo [STP] Stopped PID !TARGET_PID! for !FILE_NAME!.
+      set "PID_!FILE_NAME!="
+      del "%TEMP%\treo_pid_!FILE_NAME!.txt" >nul 2>&1
+    ) else (
+      echo [WRN] No PID found for !FILE_NAME!.
+    )
+
     set "DEPLOYED_!FILE_NAME!="
   )
 )
@@ -69,6 +89,11 @@ echo [INI :: %INSTANCE_ID%] %time:~0,8% - Initializing sequence...
 node --max-old-space-size=150 "%~dp0index.js" --configs "%CONFIG%"
 set "EXIT_CODE=%ERRORLEVEL%"
 
-echo [DWN :: %INSTANCE_ID%] %time:~0,8% - Process terminated (Code: !EXIT_CODE!). Rebooting in 5s...
+if not exist "%CONFIG%" (
+  echo [DWN :: %INSTANCE_ID%] %time:~0,8% - Config removed. Not rebooting.
+  exit /b 0
+)
+
+echo [DWN :: %INSTANCE_ID%] %time:~0,8% - Process terminated Code: !EXIT_CODE!. Rebooting in 5s...
 timeout /t 5 /nobreak >nul
 goto REBOOT_LOOP
