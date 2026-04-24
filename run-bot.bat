@@ -2,18 +2,21 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 title TREO JOCKIE TOOL
-set "CONFIG_DIR=%~dp0configs"
+cd /d "%~dp0"
 
-:: --- Child Process Route ---
-if /i "%~1"=="--child" goto IGNITION
+set "BASE_DIR=%~dp0"
+set "CONFIG_DIR=%BASE_DIR%configs"
 
-:: --- Master Controller Route ---
+if /i "%~1"=="--child" goto CHILD
+
+cls
 echo ==================================================
 echo                  TREO JOCKIE TOOL
 echo ==================================================
 echo [SYS] Scanning target directory: "%CONFIG_DIR%"
+echo.
 
-if not exist "%CONFIG_DIR%\" (
+if not exist "%CONFIG_DIR%" (
   echo [ERR] Critical failure: Directory not found.
   pause
   exit /b 1
@@ -25,75 +28,70 @@ echo [SYS] - Renaming to .off / Moving file = Auto stop account.
 echo =======================================================
 echo.
 
-:MONITOR_LOOP
+:LOOP
 
-:: Start new .env instances
 for %%f in ("%CONFIG_DIR%\*.env") do (
   if exist "%%~ff" (
-    if not defined DEPLOYED_%%~nxf (
-      set "DEPLOYED_%%~nxf=1"
+    if not defined BOT_%%~nxf (
+      set "BOT_%%~nxf=1"
+      set "RID_%%~nxf=TREO_%%~nxf_!RANDOM!_!RANDOM!"
+
       echo [SYS] %time:~0,8% - Detected payload: "%%~nxf"
       echo [AWT] Deploying instance: "%%~nxf"
 
-      powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c call ""%~f0"" --child ""%%~ff""' -WindowStyle Hidden -PassThru; Write-Output $p.Id" > "%TEMP%\treo_pid_%%~nxf.txt"
-
-      set /p "PID_%%~nxf="<"%TEMP%\treo_pid_%%~nxf.txt"
-      echo [PID] %%~nxf = !PID_%%~nxf!
+      call set "THIS_RID=%%RID_%%~nxf%%"
+      start "" /B cmd /c call "%~f0" --child "%%~ff" "!THIS_RID!"
     )
   )
 )
 
-:: Stop removed/renamed .env instances
-for /f "tokens=1* delims==" %%A in ('set DEPLOYED_ 2^>nul') do (
-  set "VAR_NAME=%%A"
-  set "FILE_NAME=!VAR_NAME:DEPLOYED_=!"
+for /f "tokens=1* delims==" %%A in ('set BOT_ 2^>nul') do (
+  set "VAR=%%A"
+  set "FILE=!VAR:BOT_=!"
 
-  if not exist "%CONFIG_DIR%\!FILE_NAME!" (
-    echo [SYS] %time:~0,8% - Detected !FILE_NAME! has been deleted/renamed!
-    echo [STP] Automatically stopping bot for !FILE_NAME!...
+  if not exist "%CONFIG_DIR%\!FILE!" (
+    echo [SYS] %time:~0,8% - Detected !FILE! has been deleted/renamed!
+    echo [STP] Automatically stopping bot for !FILE!...
 
-    set "TARGET_PID=!PID_!FILE_NAME!!"
+    call set "TARGET_RID=%%RID_!FILE!%%"
 
-    if defined TARGET_PID (
-      taskkill /F /T /PID !TARGET_PID! >nul 2>&1
-      echo [STP] Stopped PID !TARGET_PID! for !FILE_NAME!.
-      set "PID_!FILE_NAME!="
-      del "%TEMP%\treo_pid_!FILE_NAME!.txt" >nul 2>&1
+    if defined TARGET_RID (
+      for /f "tokens=2 delims=," %%P in ('
+        wmic process where "CommandLine like '%%!TARGET_RID!%%'" get ProcessId /format:csv ^| findstr /r "[0-9]"
+      ') do (
+        taskkill /F /T /PID %%P >nul 2>&1
+      )
+
+      echo [STP] Stopped !FILE!
     ) else (
-      echo [WRN] No PID found for !FILE_NAME!.
+      echo [WRN] Run ID not found for !FILE!
     )
 
-    set "DEPLOYED_!FILE_NAME!="
+    set "RID_!FILE!="
+    set "BOT_!FILE!="
+    set "TARGET_RID="
   )
 )
 
 timeout /t 3 /nobreak >nul
-goto MONITOR_LOOP
+goto LOOP
 
 
-:IGNITION
+:CHILD
 set "CONFIG=%~2"
-set "INSTANCE_ID=%~nx2"
+set "TREO_RUN_ID=%~3"
+set "NAME=%~nx2"
 
-echo [DBG] Child started for "%INSTANCE_ID%"
-echo [DBG] CONFIG = "%CONFIG%"
+:RESTART
 
-:REBOOT_LOOP
-if not exist "%CONFIG%" (
-  echo [DWN :: %INSTANCE_ID%] %time:~0,8% - Process terminated safely.
-  exit /b 0
-)
+if not exist "%CONFIG%" exit /b 0
 
-echo [INI :: %INSTANCE_ID%] %time:~0,8% - Initializing sequence...
-node --max-old-space-size=150 "%~dp0index.js" --configs "%CONFIG%"
-set "EXIT_CODE=%ERRORLEVEL%"
+echo [INI :: %NAME%] %time:~0,8% - Initializing sequence...
 
-if not exist "%CONFIG%" (
-  echo [DWN :: %INSTANCE_ID%] %time:~0,8% - Config removed. Not rebooting.
-  exit /b 0
-)
+node "%BASE_DIR%index.js" --configs "%CONFIG%" --treo-run-id "%TREO_RUN_ID%"
 
-echo [DWN :: %INSTANCE_ID%] %time:~0,8% - Process terminated Code: !EXIT_CODE!. Rebooting in 5s...
+if not exist "%CONFIG%" exit /b 0
+
+echo [DWN :: %NAME%] %time:~0,8% - Process terminated. Rebooting in 5s...
 timeout /t 5 /nobreak >nul
-goto REBOOT_LOOP
+goto RESTART
