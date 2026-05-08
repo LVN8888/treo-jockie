@@ -34,6 +34,7 @@ async function startAccount(client, acc) {
   let isManualDisconnect = false;
   let musicTimer = null;
   let currentConnection = null;
+  let watchdogTimer = null; // Khai báo thêm timer cho Watchdog
 
   const clearMusicTimer = () => {
     if (musicTimer) {
@@ -131,6 +132,26 @@ async function startAccount(client, acc) {
     await handleReconnect();
   }
 
+  // ==========================================
+  // WATCHDOG: GIÁM SÁT KẾT NỐI MỖI 2 PHÚT
+  // ==========================================
+  watchdogTimer = setInterval(async () => {
+    try {
+      const guild = client.guilds.cache.get(acc.guildId);
+      if (!guild) return;
+
+      const botMember = guild.members.cache.get(client.user.id);
+      
+      // Kiểm tra nếu Bot không ở trong kênh voice VÀ không trong quá trình chủ động ngắt/kết nối lại
+      if (!botMember?.voice.channelId && !isReconnecting && !isManualDisconnect) {
+        logger(`[WATCHDOG - ${client.user.tag}] Phát hiện bot kẹt/rớt Voice! Đang tự động kích hoạt reconnect...`);
+        await handleReconnect();
+      }
+    } catch (err) {
+      logger(`[WATCHDOG ERROR - ${client.user.tag}] ${err.message}`);
+    }
+  }, 120000); // 120000ms = 2 phút
+
   client.on("voiceStateUpdate", async (oldState, newState) => {
     try {
       if (!oldState?.guild?.id || oldState.guild.id !== acc.guildId) return;
@@ -169,7 +190,9 @@ async function startAccount(client, acc) {
           `🛠️ **DANH SÁCH LỆNH:**\n` +
           `\`!music on\` / \`off\` ➔ Bật/tắt vòng lặp nhạc\n` +
           `\`!channel <ID_KÊNH>\` ➔ Đổi channel treo (sẽ tự động gọi bot Jockie theo nếu Auto Music đang BẬT)\n` +
-          `\`!playlist <Link>\` ➔ Đổi playlist mới\n\n` +
+          `\`!playlist <Link>\` ➔ Đổi playlist mới\n` +
+          `\`!thoitiet <Địa điểm>\` ➔ Xem thời tiết tại địa điểm (VD: \`!thoitiet Hồ Chí Minh\`)\n` +
+          `\`!dich <Mã ngôn ngữ> <văn bản>\` ➔ Dịch văn bản (VD: \`!dich en Xin chào\`)\n\n` +
           `⚠️ **Lưu ý**: *Nếu muốn bật/tắt Auto Music thì sử dụng lệnh trước khi đổi channel treo để tránh lỗi treo.*`;
 
         await message.reply(menuText).catch(() => {});
@@ -259,6 +282,62 @@ async function startAccount(client, acc) {
           await bootstrapMusicLoop();
         }
       }
+
+      else if (command === "!thoitiet") {
+        const location = args.join(" ") || "Ho Chi Minh"; 
+        
+        let waitingMsg;
+        try {
+          waitingMsg = await message.reply(`⏳ Đang dò trạm khí tượng tại \`${location}\`...`);
+        } catch (err) {
+          return; 
+        }
+
+        try {
+          const response = await fetch(`https://wttr.in/${encodeURIComponent(location)}?format=4`);
+          if (!response.ok) throw new Error("Không tìm thấy địa điểm");
+          
+          let weatherData = await response.text();
+          weatherData = weatherData.trim();
+          const parts = weatherData.split(":");
+          if (parts.length > 1) {
+            parts[0] = parts[0]
+              .split(" ")
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(" ");
+          
+            weatherData = parts.join(":");
+          }
+          // -----------------------------------
+          
+          await waitingMsg.edit(`🌤️ **Thông tin thời tiết:**\n> \`${weatherData}\``).catch(() => {});
+        } catch (err) {
+          logger(`[WEATHER ERROR] ${err.message}`);
+          await waitingMsg.edit(`⚠️ Không tìm thấy thời tiết cho \`${location}\`. Thử kiểm tra lại tên nhé!`).catch(() => {});
+        }
+      }
+      else if (command === "!dich") {
+        const langTo = args[0];
+        const textToTranslate = args.slice(1).join(" ");
+
+        if (!langTo || !textToTranslate) {
+          return message.reply("⚠️ Sai cú pháp! VD: `!dich en Xin chào` hoặc `!dich vi Hello`").catch(() => {});
+        }
+
+        try {
+          const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${langTo}&dt=t&q=${encodeURIComponent(textToTranslate)}`;
+          const response = await fetch(url);
+          const data = await response.json();
+          
+          const translatedText = data[0][0][0];
+
+          await message.reply(`🌐 **Bản dịch:**\n> ${translatedText}`).catch(() => {});
+        } catch (err) {
+          logger(`[TRANSLATE ERROR] ${err.message}`);
+          await message.reply("⚠️ Lỗi: Không thể dịch lúc này.").catch(() => {});
+        }
+      }
+
     } catch (err) {
       logger(`[COMMAND ERROR] ${err.message}`);
     }
