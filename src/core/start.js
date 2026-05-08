@@ -191,8 +191,8 @@ async function startAccount(client, acc) {
           `\`!music on\` / \`off\` ➔ Bật/tắt vòng lặp nhạc\n` +
           `\`!channel <ID_KÊNH>\` ➔ Đổi channel treo (sẽ tự động gọi bot Jockie theo nếu Auto Music đang BẬT)\n` +
           `\`!playlist <Link>\` ➔ Đổi playlist mới\n` +
-          `\`!thoitiet <Địa điểm>\` ➔ Xem thời tiết tại địa điểm (VD: \`!thoitiet Hồ Chí Minh\`)\n` +
-          `\`!dich <Mã ngôn ngữ> <văn bản>\` ➔ Dịch văn bản (VD: \`!dich en Xin chào\`)\n\n` +
+          `\`!reconnect\` ➔ Reconnect lại Voice channel\n` +
+          `\`!thoitiet <Địa_điểm>\` ➔ Xem thời tiết tại địa điểm (VD: \`!thoitiet Hồ Chí Minh\`)\n` +
           `⚠️ **Lưu ý**: *Nếu muốn bật/tắt Auto Music thì sử dụng lệnh trước khi đổi channel treo để tránh lỗi treo.*`;
 
         await message.reply(menuText).catch(() => {});
@@ -308,7 +308,6 @@ async function startAccount(client, acc) {
           
             weatherData = parts.join(":");
           }
-          // -----------------------------------
           
           await waitingMsg.edit(`🌤️ **Thông tin thời tiết:**\n> \`${weatherData}\``).catch(() => {});
         } catch (err) {
@@ -316,25 +315,26 @@ async function startAccount(client, acc) {
           await waitingMsg.edit(`⚠️ Không tìm thấy thời tiết cho \`${location}\`. Thử kiểm tra lại tên nhé!`).catch(() => {});
         }
       }
-      else if (command === "!dich") {
-        const langTo = args[0];
-        const textToTranslate = args.slice(1).join(" ");
-
-        if (!langTo || !textToTranslate) {
-          return message.reply("⚠️ Sai cú pháp! VD: `!dich en Xin chào` hoặc `!dich vi Hello`").catch(() => {});
-        }
-
+      else if (command === "!reconnect") {
+        let notiMsg;
         try {
-          const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${langTo}&dt=t&q=${encodeURIComponent(textToTranslate)}`;
-          const response = await fetch(url);
-          const data = await response.json();
-          
-          const translatedText = data[0][0][0];
+          notiMsg = await message.reply("🔄 Đang reconnect lại Voice channel...").catch(() => {});
+          isManualDisconnect = true; 
+        
+          await handleReconnect();
+          isManualDisconnect = false;
 
-          await message.reply(`🌐 **Bản dịch:**\n> ${translatedText}`).catch(() => {});
+          if (notiMsg) {
+            await notiMsg.edit("✅ Đã kết nối lại Voice thành công!").catch(() => {});
+          }
+
         } catch (err) {
-          logger(`[TRANSLATE ERROR] ${err.message}`);
-          await message.reply("⚠️ Lỗi: Không thể dịch lúc này.").catch(() => {});
+          logger(`[RECONNECT COMMAND ERROR] ${err.message}`);
+          isManualDisconnect = false; 
+          
+          if (notiMsg) {
+            await notiMsg.edit("⚠️ Có lỗi xảy ra khi reconnect, vui lòng kiểm tra log!").catch(() => {});
+          }
         }
       }
 
