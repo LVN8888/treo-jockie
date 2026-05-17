@@ -192,7 +192,6 @@ async function startAccount(client, acc) {
           `\`!channel <ID_KÊNH>\` ➔ Đổi channel treo (sẽ tự động gọi bot Jockie theo nếu Auto Music đang BẬT)\n` +
           `\`!playlist <Link>\` ➔ Đổi playlist mới\n` +
           `\`!reconnect\` ➔ Reconnect lại Voice channel\n` +
-          `\`!thoitiet <Địa_điểm>\` ➔ Xem thời tiết tại địa điểm (VD: \`!thoitiet Hồ Chí Minh\`)\n` +
           `⚠️ **Lưu ý**: *Nếu muốn bật/tắt Auto Music thì sử dụng lệnh trước khi đổi channel treo để tránh lỗi treo.*`;
 
         await message.reply(menuText).catch(() => {});
@@ -280,39 +279,6 @@ async function startAccount(client, acc) {
         if (acc.sendChat) {
           clearMusicTimer();
           await bootstrapMusicLoop();
-        }
-      }
-
-      else if (command === "!thoitiet") {
-        const location = args.join(" ") || "Ho Chi Minh"; 
-        
-        let waitingMsg;
-        try {
-          waitingMsg = await message.reply(`⏳ Đang dò trạm khí tượng tại \`${location}\`...`);
-        } catch (err) {
-          return; 
-        }
-
-        try {
-          const response = await fetch(`https://wttr.in/${encodeURIComponent(location)}?format=4`);
-          if (!response.ok) throw new Error("Không tìm thấy địa điểm");
-          
-          let weatherData = await response.text();
-          weatherData = weatherData.trim();
-          const parts = weatherData.split(":");
-          if (parts.length > 1) {
-            parts[0] = parts[0]
-              .split(" ")
-              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-              .join(" ");
-          
-            weatherData = parts.join(":");
-          }
-          
-          await waitingMsg.edit(`🌤️ **Thông tin thời tiết:**\n> \`${weatherData}\``).catch(() => {});
-        } catch (err) {
-          logger(`[WEATHER ERROR] ${err.message}`);
-          await waitingMsg.edit(`⚠️ Không tìm thấy thời tiết cho \`${location}\`. Thử kiểm tra lại tên nhé!`).catch(() => {});
         }
       }
       else if (command === "!reconnect") {
